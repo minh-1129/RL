@@ -68,7 +68,7 @@ from bfcl_eval.model_handler.local_inference.salesforce_qwen import (
     SalesforceQwenHandler,
 )
 from bfcl_eval.model_handler.local_inference.think_agent import ThinkAgentHandler
-
+from bfcl_eval.model_handler.local_inference.qwen_2_5 import Qwen25Handler
 # -----------------------------------------------------------------------------
 # A mapping of model identifiers to their respective model configurations.
 # Each key corresponds to the model id passed to the `--model` argument
@@ -1619,6 +1619,42 @@ local_inference_model_map = {
         input_price=None,
         output_price=None,
         is_fc_model=True,
+        underscore_to_dot=False,
+    ),
+    "Qwen/Qwen2.5-0.5B-Instruct": ModelConfig(
+        model_name="Qwen/Qwen2.5-0.5B-Instruct",
+        display_name="Qwen2.5-0.5B-Instruct (Prompt)",
+        url="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct",
+        org="Qwen",
+        license="apache-2.0",
+        model_handler=Qwen25Handler,
+        input_price=None,
+        output_price=None,
+        is_fc_model=False,
+        underscore_to_dot=False,
+    ),
+    "Qwen/Qwen2.5-1.5B-Instruct": ModelConfig(
+        model_name="Qwen/Qwen2.5-1.5B-Instruct",
+        display_name="Qwen2.5-1.5B-Instruct (Prompt)",
+        url="https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct",
+        org="Qwen",
+        license="apache-2.0",
+        model_handler=Qwen25Handler,
+        input_price=None,
+        output_price=None,
+        is_fc_model=False,
+        underscore_to_dot=False,
+    ),
+    "Qwen/Qwen2.5-3B-Instruct": ModelConfig(
+        model_name="Qwen/Qwen2.5-3B-Instruct",
+        display_name="Qwen2.5-3B-Instruct (Prompt)",
+        url="https://huggingface.co/Qwen/Qwen2.5-3B-Instruct",
+        org="Qwen",
+        license="apache-2.0",
+        model_handler=Qwen25Handler,
+        input_price=None,
+        output_price=None,
+        is_fc_model=False,
         underscore_to_dot=False,
     ),
     "Qwen/Qwen3-0.6B": ModelConfig(

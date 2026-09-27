@@ -1,0 +1,6 @@
+trl
+wandb
+peft
+openai
+vllm=="0.8.4"
+deepspeed
