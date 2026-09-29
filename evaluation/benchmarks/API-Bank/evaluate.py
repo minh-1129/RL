@@ -1,12 +1,11 @@
 import os
 import json
-from vllm import LLM, SamplingParams
-from tqdm import tqdm
 
 
 if __name__ == "__main__":
     # add args
     import argparse
+    parser = argparse.ArgumentParser()
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_paths", type=str, default=None, help="Comma-separated model paths")
     args = parser.parse_args()
@@ -17,7 +16,7 @@ if __name__ == "__main__":
     
     for model_path in args.model_paths:
         
-        model_name = model_path.split("/")[-1].replace("/", "_")
+        model_name = model_path.split("TinyZero/")[-1].replace("/", "_")
         save_path = f"PATH_TO_YOUR_SCORE_ROOT/{model_name}"
         os.makedirs(save_path, exist_ok=True)
         result_save_path = os.path.join(save_path, "result.json")
@@ -26,108 +25,135 @@ if __name__ == "__main__":
         if os.path.exists(result_save_path):
             results = json.load(open(result_save_path, "r", encoding="utf-8"))
         else:
-            results = {}
+            assert False, f"No result file found, please check the model path: {model_path}"
         if os.path.exists(score_save_path):
             scores = json.load(open(score_save_path, "r", encoding="utf-8"))
         else:
             scores = {}
         
-        has_unfinished_flag = False
-        for level in ["1", "2", "3"]:
-            data_path = f"./level-{level}-api_processed.json"
-            datas = json.load(open(data_path, "r", encoding="utf-8"))
-            for id, data in tqdm(enumerate(datas)):
-                gold = "Level" + level + "_" + str(id)
-                if gold not in results:
-                    has_unfinished_flag = True
-                    break
-        # if not has_unfinished_flag:
-        #     print("All done for", model_path)
-        #     continue
-        
-        print("Loading model with vLLM...")
-        llm = LLM(
-            model=model_path,
-            tensor_parallel_size=int(os.getenv("WORLD_SIZE", 1)),
-            gpu_memory_utilization=0.3,
-            max_model_len=4096,
-            # dtype="bfloat16"
-        )
-        sampling_params = SamplingParams(
-            max_tokens=4096, 
-            temperature=0.0001,
-        )
-        
-        log = {"success": 0, "fail": 0, "exist": 0}
-        
-        for level in ["1", "2", "3"]:
-            data_path = f"./level-{level}-api_processed.json"
-            datas = json.load(open(data_path, "r", encoding="utf-8"))
-            for id, data in tqdm(enumerate(datas)):
-                gold = "Level" + level + "_" + str(id)
-                
-                # if gold in results:
-                #     continue
-                if gold in scores and scores[gold]["score"] == 1:
-                    print("Already scored: ", gold, "!!!!!")
-                    log["exist"] += 1
-                    continue
-                
-                sys_prompt = data["system"]
-                user_prompt = data["user"]
-                messages = [
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": user_prompt}
-                ]
-                
+        for key, result in results.items():
+            # if key in scores:
+            #     continue
+            
+            tool_calls = result["tool_calls"]
+            answer = result["data"]["answer"]
+            if type(answer) == list:
+                answer = answer[0]
+            answer_name = answer["name"]
+            answer_parameters = answer["parameters"]
+            
+            score = 0
+            
+            # ================ SOFT MATCH ================
+            if len(tool_calls) != 1:
+                pass
+                # print("Tool calls length is not 1")
+            if True:
                 try:
-                    result = llm.chat(messages, sampling_params=sampling_params)
-                    assistant_output = result[0].outputs[0].text.strip()
-                    
-                    thought = ""
-                    all_tool_calls = []
-                    thought = assistant_output.split("<think>")[-1].split("</think>")[0].strip()
-                    
-                    tool_calls = assistant_output.split("<tool_call>")[-1].split("</tool_call>")[0].strip()
-                    tool_calls = tool_calls.strip().split("\n")
                     for tool_call in tool_calls:
-                        if tool_call.strip() == "":
-                            continue
-                        try:
+                        if type(tool_call) == str:
                             tool_call = json.loads(tool_call)
-                            all_tool_calls.append(tool_call)
-                        except:
-                            pass
-                    
-                    record = {
-                        "data": data,
-                        "raw_output": assistant_output,
-                        "thought": thought,
-                        "tool_calls": all_tool_calls
-                    }
-                    results[gold] = record
-                    
-                    with open(result_save_path, "w", encoding="utf-8") as f:
-                        json.dump(results, f, indent=4, ensure_ascii=False)
-                    log["success"] += 1
-                    
+                        predict = tool_call
+                        
+                        if "name" not in predict or "parameters" not in predict:
+                            # assert False, f"Tool call {tool_call} is not valid in format"
+                            name = answer_name
+                            parameters = predict
+                        else:
+                            name = predict["name"]
+                            parameters = predict["parameters"]
+                        
+                        if name == answer_name and parameters == answer_parameters:
+                            score += 1
+                            break
+                
                 except Exception as e:
-                    print(f"Error in processing {gold}: {e}")
-                    log["fail"] += 1
-                    
-                    record = {
-                        "data": data,
-                        "raw_output": assistant_output,
-                        "thought": "",
-                        "tool_calls": []
-                    }
-                    
-                    results[gold] = record
-                    continue
+                    print("Error parsing tool call:", tool_call)
+
+            # =============== HARD MATCH ================
+            # if len(tool_calls) != 1:
+            #     pass
+            #     # print("Tool calls length is not 1")
+            # else:
+            #     try:
+            #         tool_call = tool_calls[-1]
+            #         if type(tool_call) == str:
+            #             tool_call = json.loads(tool_call)
+            #         predict = tool_call
+                        
+            #         name = predict["name"]
+            #         parameters = predict["parameters"]
+                        
+            #         if name == answer_name and parameters == answer_parameters:
+            #             score += 1
                 
-                print(log)
+            #     except Exception as e:
+            #         print(e)
+            #         print("Error parsing tool call:", tool_call)
+            
+            
+            result["score"] = score
+            scores[key] = result
                 
-        with open(result_save_path, "w", encoding="utf-8") as f:
-            json.dump(results, f, indent=4, ensure_ascii=False)
-        print(log)
+        with open(score_save_path, "w", encoding="utf-8") as f:
+            json.dump(scores, f, indent=4, ensure_ascii=False)
+        
         print("All done for", model_path)
+        
+    # leaderboard
+    score_root = "PATH_TO_YOUR_SCORE_ROOT"
+    leader_board = {}
+    for dir in os.listdir(score_root):
+        score_path = os.path.join(score_root, dir, "score.json")
+        if not os.path.exists(score_path):
+            continue
+        record = {
+            "correct_lv1": 0,
+            "correct_lv2": 0,
+            "correct_lv3": 0,
+            "total_lv1": 0,
+            "total_lv2": 0,
+            "total_lv3": 0
+        }
+        scores = json.load(open(score_path, "r", encoding="utf-8"))
+        for key, result in scores.items():
+            score = result["score"]
+            if score == 1:
+                if key.startswith("Level1"):
+                    record["correct_lv1"] += 1
+                    record["total_lv1"] += 1
+                elif key.startswith("Level2"):
+                    record["correct_lv2"] += 1
+                    record["total_lv2"] += 1
+                elif key.startswith("Level3"):
+                    record["correct_lv3"] += 1
+                    record["total_lv3"] += 1
+            else:
+                if key.startswith("Level1"):
+                    record["total_lv1"] += 1
+                elif key.startswith("Level2"):
+                    record["total_lv2"] += 1
+                elif key.startswith("Level3"):
+                    record["total_lv3"] += 1
+        
+        lv1_acc = round(record["correct_lv1"] / record["total_lv1"] * 100, 2) if record["total_lv1"] > 0 else 0
+        lv2_acc = round(record["correct_lv2"] / record["total_lv2"] * 100, 2) if record["total_lv2"] > 0 else 0
+        lv3_acc = round(record["correct_lv3"] / record["total_lv3"] * 100, 2) if record["total_lv3"] > 0 else 0
+        overall_acc = round((record["correct_lv1"] + record["correct_lv2"] + record["correct_lv3"]) / (record["total_lv1"] + record["total_lv2"] + record["total_lv3"]) * 100, 2) if (record["total_lv1"] + record["total_lv2"] + record["total_lv3"]) > 0 else 0
+        
+        record["lv1_acc"] = lv1_acc
+        record["lv2_acc"] = lv2_acc
+        record["lv3_acc"] = lv3_acc
+        record["overall_acc"] = overall_acc
+        
+        leader_board[dir] = record
+        
+    # sort the leader board based on the overall accuracy
+    sorted_leader_board = dict(sorted(leader_board.items(), key=lambda item: item[1]["overall_acc"], reverse=True))
+    for key, value in sorted_leader_board.items():
+        print(f"{key}: & {value['overall_acc']}\\% & {value['lv1_acc']}\\% & {value['lv2_acc']}\\% & {value['lv3_acc']} \\\\")
+    # save the leaderboard
+    leaderboard_path = os.path.join(score_root, "leaderboard.json")
+    with open(leaderboard_path, "w", encoding="utf-8") as f:
+        json.dump(sorted_leader_board, f, indent=4, ensure_ascii=False)
+        print("Leaderboard saved to", leaderboard_path)
