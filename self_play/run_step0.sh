@@ -2,8 +2,9 @@
 set -e
 MODEL_PATH=${1:-"Qwen/Qwen2.5-1.5B-Instruct"}
 PORT=${2:-5000}
-SERVER_PID_FILE="${VLLM_SERVER_PID_FILE:-$PWD/.vllm_server.pid}"
-SERVER_LOG="${VLLM_SERVER_LOG:-$PWD/vllm_server.log}"
+SERVER_PID_FILE="${VLLM_SERVER_PID_FILE:-$PWD/logs/vllm_server.pid}"
+SERVER_LOG="${VLLM_SERVER_LOG:-$PWD/logs/vllm_server.log}"
+mkdir -p "$(dirname "$SERVER_PID_FILE")" "$(dirname "$SERVER_LOG")"
 
 # export VLLM_DISABLE_COMPILE_CACHE=1
 echo "Starting vLLM on port $PORT with model: $MODEL_PATH"

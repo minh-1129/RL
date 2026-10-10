@@ -8,8 +8,29 @@ TRAIN_STEPS_SOLVER=50
 BASE_DIR="${SELF_PLAY_OUTPUT_DIR:-./${ABBREVIATION}}"
 SOLVER_PORT="${SOLVER_PORT:-5000}"
 export SOLVER_BASE_URL="http://127.0.0.1:${SOLVER_PORT}/v1"
-export VLLM_SERVER_PID_FILE="$PWD/.vllm_server_${SLURM_JOB_ID:-$$}.pid"
-export VLLM_SERVER_LOG="$PWD/vllm_server_${SLURM_JOB_ID:-$$}.log"
+VLLM_LOG_DIR="${BASE_DIR}/logs"
+mkdir -p "$VLLM_LOG_DIR"
+export VLLM_SERVER_PID_FILE="${VLLM_LOG_DIR}/vllm_server_${SLURM_JOB_ID:-$$}.pid"
+export VLLM_SERVER_LOG="${VLLM_LOG_DIR}/vllm_solver_v0.log"
+VRAM_LOG_INTERVAL_SECONDS="${VRAM_LOG_INTERVAL_SECONDS:-60}"
+VRAM_MONITOR_PID=""
+if [[ ! "$VRAM_LOG_INTERVAL_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "VRAM_LOG_INTERVAL_SECONDS must be a positive integer" >&2
+    exit 1
+fi
+if command -v nvidia-smi >/dev/null; then
+    (
+        while true; do
+            printf '[%s] GPU VRAM (index, used MiB, total MiB):\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            nvidia-smi --query-gpu=index,memory.used,memory.total --format=csv,noheader,nounits
+            sleep "$VRAM_LOG_INTERVAL_SECONDS"
+        done
+    ) &
+    VRAM_MONITOR_PID=$!
+    echo "Logging GPU VRAM every ${VRAM_LOG_INTERVAL_SECONDS}s to the job output"
+else
+    echo "nvidia-smi is unavailable; skipping VRAM logging" >&2
+fi
 
 stop_solver_server() {
     local server_pid
@@ -34,7 +55,14 @@ stop_solver_server() {
     echo "vLLM process $server_pid did not stop" >&2
     return 1
 }
-trap stop_solver_server EXIT
+cleanup() {
+    if [[ -n "$VRAM_MONITOR_PID" ]]; then
+        kill "$VRAM_MONITOR_PID" 2>/dev/null || true
+        wait "$VRAM_MONITOR_PID" 2>/dev/null || true
+    fi
+    stop_solver_server
+}
+trap cleanup EXIT
 
 export WANDB_DISABLED=false
 export WANDB_PROJECT="self-play-$ABBREVIATION"
@@ -121,6 +149,7 @@ do
 
 
     echo "[Iter $i] Step 0: Hosting Solver v$prev..."
+    export VLLM_SERVER_LOG="${VLLM_LOG_DIR}/vllm_solver_v${prev}.log"
     bash run_step0.sh "$PREV_SOLVER_CKPT" "$SOLVER_PORT" || exit 1
 
 
