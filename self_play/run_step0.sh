@@ -1,0 +1,33 @@
+#!/bin/bash
+MODEL_PATH=${1:-"Qwen/Qwen2.5-1.5B-Instruct"}
+PORT=${2:-5000}
+
+# export VLLM_DISABLE_COMPILE_CACHE=1
+echo "Starting vLLM on port $PORT with model: $MODEL_PATH"
+
+export VLLM_USE_V1=0
+
+CUDA_VISIBLE_DEVICES=0 python -m vllm.entrypoints.openai.api_server \
+  --model "$MODEL_PATH" \
+  --served-model-name solver \
+  --port $PORT \
+  --enforce-eager \
+  --gpu-memory-utilization 0.30 \
+  --tensor-parallel-size 1 > vllm_server.log 2>&1 &
+
+server_pid=$!
+echo "Waiting for vLLM to initialize..."
+for ((attempt=1; attempt<=150; attempt++)); do
+  if ! kill -0 "$server_pid" 2>/dev/null; then
+    echo "vLLM exited before becoming ready. Check vllm_server.log" >&2
+    exit 1
+  fi
+  if python -c 'import sys, urllib.request; urllib.request.urlopen("http://127.0.0.1:" + sys.argv[1] + "/v1/models", timeout=2).close()' "$PORT" >/dev/null 2>&1; then
+    echo "vLLM is ready on port $PORT"
+    exit 0
+  fi
+  sleep 2
+done
+
+echo "Timed out waiting for vLLM. Check vllm_server.log" >&2
+exit 1

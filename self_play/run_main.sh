@@ -1,0 +1,144 @@
+#!/bin/bash
+
+BASE_MODEL="Qwen/Qwen2.5-1.5B-Instruct"
+ABBREVIATION="qwen2.5-1.5b-instruct-tool-selfplay"
+ITERATIONS=5
+TRAIN_STEPS_GEN=50
+TRAIN_STEPS_SOLVER=50
+BASE_DIR="./${ABBREVIATION}"
+
+export WANDB_DISABLED=false
+export WANDB_PROJECT="self-play-$ABBREVIATION"
+
+echo "----------------------------------------------------------------"
+echo "Starting Self-Play (Iter 1 explicit + Loop for 2..$ITERATIONS)"
+echo "Base Model: $BASE_MODEL"
+echo "----------------------------------------------------------------"
+
+export TRITON_CACHE_DIR="./triton_autotune"
+mkdir -p "$TRITON_CACHE_DIR"
+
+export NCCL_ASYNC_ERROR_HANDLING=1
+export NCCL_BLOCKING_WAIT=1
+export TORCH_DISTRIBUTED_DEBUG=DETAIL
+
+export VLLM_USE_V1=0
+export VLLM_DISABLE_COMPILE_CACHE=1
+export NCCL_ASYNC_ERROR_HANDLING=1
+
+
+echo ">>> STARTING ITERATION 1 (Initialization)"
+
+GEN_V1_DIR="${BASE_DIR}/iter1_generator"
+SOLVER_V1_DIR="${BASE_DIR}/iter1_solver"
+DATA_V1_JSON="${BASE_DIR}/iter1_data.json"
+
+echo "[Iter 1] Step 0: Hosting Base Model (Solver v0)..."
+bash run_step0.sh "$BASE_MODEL" 5000
+
+echo "[Iter 1] Step 1: Training Generator v1..."
+bash run_step1.sh \
+    "$BASE_MODEL" \
+    "$GEN_V1_DIR" \
+    "${ABBREVIATION}-iter1-gen" \
+    "$TRAIN_STEPS_GEN" || exit 1
+
+GEN_V1_CKPT="${GEN_V1_DIR}/merged-${TRAIN_STEPS_GEN}"
+
+pkill python
+pkill -u $USER -f python
+pkill -f vllm
+
+pkill -f vllm || true
+pkill -u $USER -f python || true
+sleep 5
+nvidia-smi
+nvidia-smi
+
+
+export VLLM_WORKER_MULTIPROC_METHOD=spawn
+echo "[Iter 1] Step 2: Generating Data..."
+bash run_step2.sh \
+    "$GEN_V1_CKPT" \
+    "$BASE_MODEL" \
+    "$DATA_V1_JSON" || exit 1
+
+pkill -f "vllm.entrypoints.openai.api_server" || true
+sleep 5
+
+echo "[Iter 1] Step 3: Training Solver v1..."
+bash run_step3.sh \
+    "$BASE_MODEL" \
+    "$DATA_V1_JSON" \
+    "$SOLVER_V1_DIR" \
+    "${ABBREVIATION}-iter1-solver" \
+    "$TRAIN_STEPS_SOLVER" || exit 1
+
+echo ">>> FINISHED ITERATION 1"
+
+
+for (( i=2; i<=ITERATIONS; i++ ))
+do
+    prev=$((i-1))
+    echo ">>> STARTING ITERATION $i (Derived from v$prev)"
+
+    PREV_SOLVER_DIR="${BASE_DIR}/iter${prev}_solver"
+    PREV_SOLVER_CKPT="${PREV_SOLVER_DIR}/merged-${TRAIN_STEPS_SOLVER}"
+    PREV_GEN_DIR="${BASE_DIR}/iter${prev}_generator"
+    PREV_GEN_CKPT="${PREV_GEN_DIR}/merged-${TRAIN_STEPS_GEN}"
+
+
+    CURR_GEN_DIR="${BASE_DIR}/iter${i}_generator"
+    CURR_SOLVER_DIR="${BASE_DIR}/iter${i}_solver"
+    CURR_DATA_JSON="${BASE_DIR}/iter${i}_data.json"
+
+    if [ ! -d "$PREV_SOLVER_CKPT" ]; then
+        echo "ERROR: Previous solver checkpoint not found at $PREV_SOLVER_CKPT"
+        exit 1
+    fi
+    if [ ! -d "$PREV_GEN_CKPT" ]; then
+        echo "ERROR: Previous generator checkpoint not found at $PREV_GEN_CKPT"
+        exit 1
+    fi
+
+
+    echo "[Iter $i] Step 0: Hosting Solver v$prev..."
+    bash run_step0.sh "$PREV_SOLVER_CKPT" 5000
+
+
+    echo "[Iter $i] Step 1: Training Generator v$i..."
+    bash run_step1.sh \
+        "$PREV_GEN_CKPT" \
+        "$CURR_GEN_DIR" \
+        "${ABBREVIATION}-iter${i}-gen" \
+        "$TRAIN_STEPS_GEN" || exit 1
+
+
+    CURR_GEN_CKPT="${CURR_GEN_DIR}/merged-${TRAIN_STEPS_GEN}"
+
+    pkill python
+
+    echo "[Iter $i] Step 2: Generating Data..."
+    bash run_step2.sh \
+        "$CURR_GEN_CKPT" \
+        "$PREV_SOLVER_CKPT" \
+        "$CURR_DATA_JSON" || exit 1
+
+    pkill -f "vllm.entrypoints.openai.api_server" || true
+    sleep 5
+
+    echo "[Iter $i] Step 3: Training Solver v$i..."
+    bash run_step3.sh \
+        "$PREV_SOLVER_CKPT" \
+        "$CURR_DATA_JSON" \
+        "$CURR_SOLVER_DIR" \
+        "${ABBREVIATION}-iter${i}-solver" \
+        "$TRAIN_STEPS_SOLVER" || exit 1
+
+    echo ">>> FINISHED ITERATION $i"
+done
+
+echo "================================================================"
+echo "Self-Play Complete."
+echo "Model: ${BASE_DIR}/iter${ITERATIONS}_solver/merged-${TRAIN_STEPS_SOLVER}"
+echo "================================================================"

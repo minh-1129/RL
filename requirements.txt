@@ -4,3 +4,4 @@ peft
 openai
 vllm=="0.8.4"
 deepspeed
+transformers<5.0
