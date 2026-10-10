@@ -5,7 +5,7 @@ OUTPUT_DIR=$2
 RUN_NAME=$3
 STEPS=$4
 
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 
 accelerate launch \
     --config_file ./deepspeed/no_zero.yaml --num_processes 1 \

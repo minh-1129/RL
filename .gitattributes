@@ -1,1 +1,2 @@
 self_play/*.sh text eol=lf
+self_play/*.sbatch text eol=lf

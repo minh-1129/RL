@@ -669,7 +669,7 @@ def reward_difficulty_raw(prompts, completions, **kwargs) -> List[float]:
         0.0 if prerequisites fail or task is unsolvable
         0.0-1.0 based on how close p_success is to P_TARGET
     """
-    base_url = kwargs.get("base_url", "http://localhost:5000/v1")
+    base_url = kwargs.get("base_url", os.environ.get("SOLVER_BASE_URL", "http://localhost:5000/v1"))
     solver_system_prompt = kwargs["solver_prompt"][0]
     solver_model = kwargs.get("solver_model", "solver")
     
@@ -731,7 +731,7 @@ def reward_consistency(prompts, completions, **kwargs) -> List[float]:
         0.0 if prerequisites fail or all solver outputs are None
         0.0-1.0 based on mode frequency / total samples
     """
-    base_url = kwargs.get("base_url", "http://localhost:5000/v1")
+    base_url = kwargs.get("base_url", os.environ.get("SOLVER_BASE_URL", "http://localhost:5000/v1"))
     solver_system_prompt = kwargs["solver_prompt"][0]
     solver_model = kwargs.get("solver_model", "solver")
     
@@ -949,7 +949,7 @@ def reward_semantic_coherence(prompts, completions, **kwargs) -> List[float]:
         0.0 if prerequisites fail
         0.0-1.0 based on LLM judge score
     """
-    base_url = kwargs.get("base_url", "http://localhost:5000/v1")
+    base_url = kwargs.get("base_url", os.environ.get("SOLVER_BASE_URL", "http://localhost:5000/v1"))
     judge_model = kwargs.get("judge_model", kwargs.get("solver_model", "solver"))
     
     client = get_client(base_url)

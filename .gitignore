@@ -57,6 +57,11 @@ cover/
 
 # Django stuff:
 *.log
+self-play-*.out
+self_play/runs/
+self_play/qwen2.5-1.5b-instruct-tool-selfplay/
+self_play/triton_autotune/
+self_play/.vllm_server_*.pid
 local_settings.py
 db.sqlite3
 db.sqlite3-journal

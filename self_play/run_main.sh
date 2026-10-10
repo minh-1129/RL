@@ -5,7 +5,36 @@ ABBREVIATION="qwen2.5-1.5b-instruct-tool-selfplay"
 ITERATIONS=5
 TRAIN_STEPS_GEN=50
 TRAIN_STEPS_SOLVER=50
-BASE_DIR="./${ABBREVIATION}"
+BASE_DIR="${SELF_PLAY_OUTPUT_DIR:-./${ABBREVIATION}}"
+SOLVER_PORT="${SOLVER_PORT:-5000}"
+export SOLVER_BASE_URL="http://127.0.0.1:${SOLVER_PORT}/v1"
+export VLLM_SERVER_PID_FILE="$PWD/.vllm_server_${SLURM_JOB_ID:-$$}.pid"
+export VLLM_SERVER_LOG="$PWD/vllm_server_${SLURM_JOB_ID:-$$}.log"
+
+stop_solver_server() {
+    local server_pid
+    if [[ ! -f "$VLLM_SERVER_PID_FILE" ]]; then
+        return 0
+    fi
+    read -r server_pid < "$VLLM_SERVER_PID_FILE"
+    if [[ ! "$server_pid" =~ ^[0-9]+$ ]]; then
+        echo "Invalid vLLM PID in $VLLM_SERVER_PID_FILE" >&2
+        return 1
+    fi
+    kill "$server_pid" 2>/dev/null || true
+    for ((attempt=1; attempt<=30; attempt++)); do
+        if ! kill -0 "$server_pid" 2>/dev/null; then
+            if ! python -c 'import sys, urllib.request; urllib.request.urlopen("http://127.0.0.1:" + sys.argv[1] + "/v1/models", timeout=1).close()' "$SOLVER_PORT" >/dev/null 2>&1; then
+                rm -f "$VLLM_SERVER_PID_FILE"
+                return 0
+            fi
+        fi
+        sleep 1
+    done
+    echo "vLLM process $server_pid did not stop" >&2
+    return 1
+}
+trap stop_solver_server EXIT
 
 export WANDB_DISABLED=false
 export WANDB_PROJECT="self-play-$ABBREVIATION"
@@ -15,7 +44,7 @@ echo "Starting Self-Play (Iter 1 explicit + Loop for 2..$ITERATIONS)"
 echo "Base Model: $BASE_MODEL"
 echo "----------------------------------------------------------------"
 
-export TRITON_CACHE_DIR="./triton_autotune"
+export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-${SLURM_TMPDIR:-$BASE_DIR}/triton_autotune}"
 mkdir -p "$TRITON_CACHE_DIR"
 
 export NCCL_ASYNC_ERROR_HANDLING=1
@@ -34,7 +63,7 @@ SOLVER_V1_DIR="${BASE_DIR}/iter1_solver"
 DATA_V1_JSON="${BASE_DIR}/iter1_data.json"
 
 echo "[Iter 1] Step 0: Hosting Base Model (Solver v0)..."
-bash run_step0.sh "$BASE_MODEL" 5000
+bash run_step0.sh "$BASE_MODEL" "$SOLVER_PORT" || exit 1
 
 echo "[Iter 1] Step 1: Training Generator v1..."
 bash run_step1.sh \
@@ -45,15 +74,7 @@ bash run_step1.sh \
 
 GEN_V1_CKPT="${GEN_V1_DIR}/merged-${TRAIN_STEPS_GEN}"
 
-pkill python
-pkill -u $USER -f python
-pkill -f vllm
-
-pkill -f vllm || true
-pkill -u $USER -f python || true
-sleep 5
-nvidia-smi
-nvidia-smi
+stop_solver_server || exit 1
 
 
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
@@ -62,9 +83,6 @@ bash run_step2.sh \
     "$GEN_V1_CKPT" \
     "$BASE_MODEL" \
     "$DATA_V1_JSON" || exit 1
-
-pkill -f "vllm.entrypoints.openai.api_server" || true
-sleep 5
 
 echo "[Iter 1] Step 3: Training Solver v1..."
 bash run_step3.sh \
@@ -103,7 +121,7 @@ do
 
 
     echo "[Iter $i] Step 0: Hosting Solver v$prev..."
-    bash run_step0.sh "$PREV_SOLVER_CKPT" 5000
+    bash run_step0.sh "$PREV_SOLVER_CKPT" "$SOLVER_PORT" || exit 1
 
 
     echo "[Iter $i] Step 1: Training Generator v$i..."
@@ -116,16 +134,13 @@ do
 
     CURR_GEN_CKPT="${CURR_GEN_DIR}/merged-${TRAIN_STEPS_GEN}"
 
-    pkill python
+    stop_solver_server || exit 1
 
     echo "[Iter $i] Step 2: Generating Data..."
     bash run_step2.sh \
         "$CURR_GEN_CKPT" \
         "$PREV_SOLVER_CKPT" \
         "$CURR_DATA_JSON" || exit 1
-
-    pkill -f "vllm.entrypoints.openai.api_server" || true
-    sleep 5
 
     echo "[Iter $i] Step 3: Training Solver v$i..."
     bash run_step3.sh \
