@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass, field
 from datasets import Dataset, load_dataset
 import torch
+from transformers import AutoTokenizer
 
 from trl import (
     GRPOConfig,
@@ -78,9 +79,15 @@ def main():
         dtype=dtype,
     )
 
+    tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
+    tokenizer.padding_side = "left"
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
     trainer = GRPOTrainer(
         model=model_args.model_name_or_path,
         args=training_args,
+        processing_class=tokenizer,
         peft_config=get_peft_config(model_args),
         reward_funcs=[format_reward_func, accuracy_reward_func],
         train_dataset=train_dataset,

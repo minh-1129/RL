@@ -63,6 +63,8 @@ self_play/qwen2.5-1.5b-instruct-tool-selfplay/
 self_play/triton_autotune/
 self_play/.vllm_server_*.pid
 self_play/logs/
+self_play/runs/
+self_play/wandb/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -70,7 +72,7 @@ db.sqlite3-journal
 # Flask stuff:
 instance/
 .webassets-cache
-
+*.out
 # Scrapy stuff:
 .scrapy
 

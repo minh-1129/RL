@@ -9,7 +9,8 @@ STEPS=$5
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 
 accelerate launch \
-    --config_file ./deepspeed/no_zero.yaml --num_processes 1 \
+    --num_processes 1 \
+    --mixed_precision bf16 \
     step3_solver.py \
     --model_name_or_path "$MODEL_PATH" \
     --generated_data_path "$DATA_PATH" \
@@ -17,9 +18,11 @@ accelerate launch \
     --max_steps $STEPS \
     --save_steps 2 \
     --save_total_limit 2 \
-    --per_device_train_batch_size 4 \
-    --gradient_accumulation_steps 8 \
+    --per_device_train_batch_size 8 \
+    --gradient_accumulation_steps 4 \
     --learning_rate 1e-5 \
+    --beta 1e-2 \
+    --bf16 True \
     --dtype bfloat16 \
     --use_peft \
     --lora_r 128 \
