@@ -30,7 +30,7 @@ accelerate launch \
     --lora_alpha 256 \
     --lora_dropout 0.05 \
     --lora_target_modules q_proj k_proj v_proj o_proj gate_proj up_proj down_proj \
-    --max_completion_length 4096 \
+    --max_completion_length 3072 \
     --num_generations 4 \
     --remove_unused_columns False \
     --loss_type grpo \
